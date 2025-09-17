@@ -86,8 +86,10 @@ python fine_tune_xlmr_pseudo.py \
 
 
 # Инференс и метрики (валидация/тест)
+```
 python infer_and_eval.py \
   --model_dir outputs_xlmr_headonly_focal \
   --test_path test.csv \
   --categories_path categories.txt \
   --submission_path submission.csv
+```
