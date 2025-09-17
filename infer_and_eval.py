@@ -107,7 +107,6 @@ def main():
     # 5) метрики (если есть истинные метки и они сопоставимы с картой)
     if label_col is not None:
         y_true_names = df[label_col].astype(str).str.strip().tolist()
-        # фильтруем строки, где true-метка присутствует в label2id
         mask = [y in label2id for y in y_true_names]
         n_ok = sum(mask); n_total = len(y_true_names)
         if n_ok == 0:
@@ -120,7 +119,6 @@ def main():
         wf1  = f1_score(y_true, y_pred, average="weighted")
         print(f"[metrics] accuracy={acc:.4f}  weighted_f1={wf1:.4f}  (использовано {n_ok}/{n_total} строк)")
 
-        # отчёт и матрица
         rep = classification_report(
             y_true, y_pred,
             labels=list(range(num_labels)),
@@ -138,7 +136,6 @@ def main():
                                 columns=[f"pred_{id2label[i]}" for i in range(num_labels)])
         cm_df.to_csv(os.path.splitext(args.output_csv)[0] + "_confusion_matrix.csv")
 
-        # сводка json
         with open(os.path.splitext(args.output_csv)[0] + "_metrics.json", "w", encoding="utf-8") as f:
             json.dump({"accuracy": float(acc), "weighted_f1": float(wf1),
                        "used_rows": int(n_ok), "total_rows": int(n_total)}, f, indent=2, ensure_ascii=False)

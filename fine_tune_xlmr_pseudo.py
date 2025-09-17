@@ -66,10 +66,8 @@ def freeze_bottom_layers(model, n_layers: int = 0):
             p.requires_grad = False
 
 def set_base_trainable(model, flag: bool, freeze_bottom: int = 0):
-    # toggle all base params
     for p in model.roberta.parameters():
         p.requires_grad = flag
-    # optionally keep bottom frozen
     if flag and freeze_bottom > 0:
         freeze_bottom_layers(model, freeze_bottom)
 
@@ -83,13 +81,12 @@ def init_classifier_bias_with_priors(model, counts: np.ndarray):
         if hasattr(head, "out_proj") and hasattr(head.out_proj, "bias") and head.out_proj.bias is not None:
             head.out_proj.bias.copy_(b.to(head.out_proj.bias.device))
 
-# ---- class weights helpers ----
+# class weights helpers 
 def weights_inv_freq(counts: np.ndarray, alpha: float = 1.0, cap: float = 5.0):
     w = 1.0 / np.clip(counts, 1.0, None) ** alpha
     # normalize mean to 1
     avg = float((w * counts).sum() / max(counts.sum(), 1.0))
     w = w / max(avg, 1e-12)
-    # cap extreme
     w = np.minimum(w, cap)
     return w
 
@@ -112,7 +109,7 @@ def build_class_weights(mode: str, counts: np.ndarray, alpha: float, beta: float
         return weights_cb(counts, beta=beta, cap=cap)
     raise ValueError(f"Unknown class_weight_mode: {mode}")
 
-# -------------------- main --------------------
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input_csv", type=str, default="train_pseudo.csv")
@@ -147,14 +144,13 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     set_seed(args.seed)
 
-    # ---- load data
+    # load data
     df = pd.read_csv(args.input_csv)
     t_col, y_col = detect_columns(df)
     df = df[[t_col, y_col]].dropna().copy()
     df[t_col] = df[t_col].astype(str).map(normalize_text)
     df[y_col] = df[y_col].astype(str).map(str.strip)
 
-    # labels mapping
     cats = load_categories(args.categories_path)
     labels_sorted = cats if cats else sorted(df[y_col].unique().tolist())
     label2id = {lab: i for i, lab in enumerate(labels_sorted)}
@@ -169,7 +165,6 @@ def main():
 
     df["label_id"] = df[y_col].map(label2id)
 
-    # split (stratify only if every class has >=2 samples)
     counts_global = df["label_id"].value_counts()
     can_stratify = (counts_global.min() >= 2)
     if not can_stratify:
@@ -192,7 +187,6 @@ def main():
     valid_ds = ClsDS(va[t_col].tolist(), va["label_id"].tolist(), tok, args.max_length)
     collator = DataCollatorWithPadding(tok)
 
-    # sampler (optional)
     train_sampler = None
     if args.use_sampler:
         counts_train = tr["label_id"].value_counts().reindex(range(num_labels), fill_value=0).values.astype(float)
@@ -206,17 +200,13 @@ def main():
                               num_workers=2, collate_fn=collator)
     valid_loader = DataLoader(valid_ds, batch_size=args.eval_bs, shuffle=False, num_workers=2, collate_fn=collator)
 
-    # ---- model
     cfg = AutoConfig.from_pretrained(args.model_name, num_labels=num_labels, id2label=id2label, label2id=label2id)
     model = AutoModelForSequenceClassification.from_pretrained(args.model_name, config=cfg)
 
-    # init classifier bias to priors (train)
     cls_counts_train = tr["label_id"].value_counts().reindex(range(num_labels), fill_value=0).values
     init_classifier_bias_with_priors(model, cls_counts_train)
 
-    # start: train only head
     set_base_trainable(model, False)
-    # later we'll unfreeze with freeze_bottom_layers
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
@@ -229,7 +219,6 @@ def main():
 
     criterion = torch.nn.CrossEntropyLoss(weight=class_weights, label_smoothing=args.label_smoothing)
 
-    # ---- optimizer with separate LRs for base/head
     decay_terms = ["bias", "LayerNorm.weight", "layer_norm.weight", "layernorm.weight"]
     base_decay, base_nodecay, head_decay, head_nodecay = [], [], [], []
     for n, p in model.named_parameters():
@@ -257,17 +246,15 @@ def main():
     use_amp = torch.cuda.is_available()
     scaler = GradScaler("cuda") if use_amp else None
 
-    # ---- training loop
+    # training loop
     best_f1 = -1.0
     patience_left = args.patience
     all_label_ids = list(range(num_labels))
     all_target_names = [id2label[i] for i in all_label_ids]
 
     for epoch in range(1, args.epochs + 1):
-        # unfreeze base after head_init_epochs
         if epoch == args.head_init_epochs + 1:
             set_base_trainable(model, True, freeze_bottom=args.freeze_bottom_layers)
-            # need to rebuild optimizer with base params now trainable
             decay_terms = ["bias", "LayerNorm.weight", "layer_norm.weight", "layernorm.weight"]
             base_decay, base_nodecay, head_decay, head_nodecay = [], [], [], []
             for n, p in model.named_parameters():
@@ -312,7 +299,7 @@ def main():
             scheduler.step()
             running += float(loss.item())
 
-        # ---- eval
+        # eval
         model.eval()
         all_preds, all_true = [], []
         with torch.no_grad():
@@ -335,7 +322,6 @@ def main():
         wf1 = f1_score(all_true, all_preds, average="weighted") if all_true.size else 0.0
         acc = accuracy_score(all_true, all_preds) if all_true.size else 0.0
 
-        # печать распределения предсказаний (по запросу)
         if args.print_pred_dist and all_preds.size:
             unique, cnts = np.unique(all_preds, return_counts=True)
             pred_dist = {int(k): int(v) for k, v in zip(unique, cnts)}
@@ -343,7 +329,6 @@ def main():
 
         print(f"[Epoch {epoch}] train_loss={running/max(1,len(train_loader)):.4f}  val_weighted_f1={wf1:.4f}  val_acc={acc:.4f}")
 
-        # early stopping & save best
         if wf1 > best_f1:
             best_f1 = wf1
             patience_left = args.patience
@@ -370,11 +355,9 @@ def main():
                 print("Early stopping.")
                 break
 
-    # итог
     with open(os.path.join(args.output_dir, "summary.json"), "w", encoding="utf-8") as f:
         json.dump({"best_weighted_f1": float(best_f1), "epochs_run": epoch}, f, indent=2, ensure_ascii=False)
 
-    # сохранить распределения классов
     tr_dist = tr["label_id"].value_counts().sort_index().to_dict()
     va_dist = va["label_id"].value_counts().sort_index().to_dict()
     with open(os.path.join(args.output_dir, "splits_stats.json"), "w", encoding="utf-8") as f:

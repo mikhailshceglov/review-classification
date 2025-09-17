@@ -1,4 +1,3 @@
-# файл: label_with_awq.py
 import argparse, json, re, time, os, math
 from typing import List, Dict
 import pandas as pd
@@ -7,7 +6,7 @@ from transformers import AutoTokenizer
 try:
     from awq import AutoAWQForCausalLM
 except Exception:
-    from autoawq.modeling.autoawq import AutoAWQForCausalLM  # из пакета autoawq
+    from autoawq.modeling.autoawq import AutoAWQForCausalLM 
 
 JSON_RE = re.compile(r"\{.*?\}", re.DOTALL)
 
@@ -18,7 +17,6 @@ def read_categories(path:str) -> List[str]:
             s = line.strip()
             if s:
                 cats.append(s)
-    # Убираем дубли, сохраняем порядок
     seen, uniq = set(), []
     for c in cats:
         if c not in seen:
@@ -89,11 +87,11 @@ def main():
         args.model,
         trust_remote_code=True,
         safetensors=True,
-        device="cuda:0",        # жёстко CUDA
-        use_ipex=False,         # не лезем в IPEX
-        use_flash_attn=False,   # выключить FlashAttention
-        fuse_layers=False,      # выключить fused-ядра AWQ (тоже могут звать FA)
-        attn_implementation="sdpa"  # стандартное SDPA из PyTorch
+        device="cuda:0",
+        use_ipex=False,
+        use_flash_attn=False,
+        fuse_layers=False,
+        attn_implementation="sdpa" 
     )
     model.eval()
 
@@ -128,12 +126,12 @@ def main():
         out = model.generate(
             **enc,
             max_new_tokens=args.max_new,
-            do_sample=False,            # детерминированно
+            do_sample=False,
             top_p=1.0,
             eos_token_id=tok.eos_token_id,
             pad_token_id=tok.pad_token_id,
         )
-        gen = out[:, enc["input_ids"].shape[1]:]  # только сгенерированная часть
+        gen = out[:, enc["input_ids"].shape[1]:]
         decoded = tok.batch_decode(gen, skip_special_tokens=True)
 
         batch_labels = [extract_label(txt, categories) for txt in decoded]
