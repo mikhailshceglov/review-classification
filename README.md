@@ -69,3 +69,23 @@
 └── submission_example.csv # пример сабмита
 
 
+# Установка окружения и зависимостей
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Авторазметка и/или обучение
+python fine_tune_xlmr_pseudo.py \
+  --train_path train.csv \
+  --categories_path categories.txt \
+  --output_dir outputs_xlmr_headonly_focal \
+  --epochs 3 --batch_size 16 --lr 2e-5 \
+  --use_focal --class_weights
+
+
+# Инференс и метрики (валидация/тест)
+python infer_and_eval.py \
+  --model_dir outputs_xlmr_headonly_focal \
+  --test_path test.csv \
+  --categories_path categories.txt \
+  --submission_path submission.csv
